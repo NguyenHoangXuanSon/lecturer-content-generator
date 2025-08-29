@@ -1,1 +1,1 @@
-# lecturer-content-
+# lecturer-content-generator
