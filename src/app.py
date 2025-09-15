@@ -1,44 +1,57 @@
+# app.py
+
 import os
-import sys
-# Thêm đường dẫn thư mục gốc của dự án vào PYTHONPATH
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-
-from fastapi import FastAPI, UploadFile, File
+import traceback
+import json
+from fastapi import FastAPI, UploadFile, File, Form
+from pydantic import BaseModel, Field
 from fastapi.concurrency import run_in_threadpool
-from src.utils import get_file_text, get_text_chunks, save_embeddings_to_db
-from src.db_connection import create_not_existed_table
-
+from typing import Optional, List
+from src.utils import (
+    get_file_text, get_text_chunks, save_embeddings_to_db,
+    generate_lecture_content, retrive_data_from_db,
+    LectureContent, MainPoint
+)
+from src.db_connection import create_not_existed_table, get_connection
+from src.utils import validate_extension
 app = FastAPI()
 
-@app.on_event("startup")
-def startup_event():
-    """Tạo bảng database khi ứng dụng khởi động."""
-    create_not_existed_table()
+class UploadResponse(BaseModel):
+    status: str = Field(..., description="Trạng thái của yêu cầu")
+    lecture: Optional[LectureContent] = Field(None, description="Nội dung bài giảng được tạo ra")
+    detail: Optional[str] = Field(None, description="Chi tiết lỗi nếu yêu cầu thất bại")
 
-@app.get("/")
-def health_check():
-    """Kiểm tra trạng thái của API"""
-    return {"status": "successful"}
+@app.post("/validate-extension/")
+async def validate_file_extension(file: UploadFile = File(...)):
+    file_extention = validate_extension(file)
+    return {"status": "successfull", "extension": file_extention}
 
-@app.post("/uploadfile/")
-async def upload_file(file: UploadFile = File(...)):
-    """
-    Xử lý tệp được tải lên, trích xuất văn bản, tạo chunks
-    và lưu embeddings vào cơ sở dữ liệu.
-    """
+@app.post("/uploadfile/", response_model=UploadResponse)
+async def upload_file_with_prompt(file: UploadFile = File(...), user_query: str = Form(...)):
     try:
         text = await get_file_text(file)
-        
-        if not text: 
+        if not text:
             return {"status": "error", "detail": "Không đọc được dữ liệu từ tệp."}
-
+        
         text_chunks = await run_in_threadpool(get_text_chunks, text)
         if not text_chunks:
-            return {"status": "error", "detail": "Không thể chia văn bản thành các chunks. Tệp có thể rỗng."}
+            return {"status": "error", "detail": "Không thể chia văn bản thành các chunks."}
         
+        await run_in_threadpool(create_not_existed_table)
         await run_in_threadpool(save_embeddings_to_db, text_chunks)
+
+        docs = await run_in_threadpool(retrive_data_from_db, user_query, 5)
+
+        if not docs:
+            return {"status": "error", "detail": "Không tìm thấy dữ liệu phù hợp trong DB."}
+
+        lecture_content = await run_in_threadpool(generate_lecture_content, user_query)
         
-        return {"status": "success", "chunks_count": len(text_chunks)}
+        if not lecture_content:
+            return {"status": "error", "detail": "Không thể tạo nội dung bài giảng. Kiểm tra log để biết thêm chi tiết."}
+
+        return {"status": "success", "lecture": lecture_content}
 
     except Exception as e:
-        return {"status": "error", "detail": f"Đã xảy ra lỗi: {str(e)}"}
+        traceback.print_exc()
+        return {"status": "error", "detail": str(e)}

@@ -1,29 +1,33 @@
 import psycopg2
 import pickle
-from src.config import hostname, database, username, pwd, port_id
+from src.config import HOST_NAME, DB_NAME, USER_NAME, PWD, PORT_ID
+import os
 
 def get_connection():
     return psycopg2.connect(
-        host=hostname,
-        database=database,
-        user=username,
-        password=pwd,
-        port=port_id
+        host=HOST_NAME,
+        database=DB_NAME,
+        user=USER_NAME,
+        password=PWD,
+        port=PORT_ID
     )
 
 def create_not_existed_table():
-
+    """ Create a new table if not existed"""
     conn = None
     cur = None
+
     try:
         conn = get_connection()
         cur = conn.cursor()
+
+        cur.execute("CREATE EXTENSION IF NOT EXISTS vector;")
         
         create_script = '''
             CREATE TABLE IF NOT EXISTS knowledge_base(
                 id          SERIAL PRIMARY KEY,
                 text        TEXT NOT NULL,
-                embedding   BYTEA NOT NULL
+                embedding   vector(384) NOT NULL
             );'''
         
         cur.execute(create_script)
