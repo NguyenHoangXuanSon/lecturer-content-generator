@@ -1,0 +1,42 @@
+version: "3.8"
+
+services:
+  database:
+    image: ankane/pgvector:v0.5.0
+    env_file:
+      - .env
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    ports:
+      - "5433:5432"
+    networks:
+      - postgres-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  web:
+    build: .
+    env_file:
+      - .env
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./src:/app/src
+      - ./alembic:/app/alembic 
+      - ./.env:/app/.env       
+    command: bash -c "alembic upgrade head && uvicorn src.app:app --reload --host 0.0.0.0 --port 8000"
+    depends_on:
+      - database
+    networks:
+      - postgres-network
+
+volumes:
+  postgres-data:
+
+networks:
+  postgres-network:
+    driver: bridge
